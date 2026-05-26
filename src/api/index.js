@@ -1,6 +1,8 @@
 const http = require('http');
 const { AutoDetector } = require('../core/detector');
 const { EncryptionEngine } = require('../core/encryptors');
+const { L1Decryptor } = require('../core/decryptors/l1');
+const { Deobfuscator } = require('../core/deobfuscator/sandbox');
 
 const detector = new AutoDetector();
 
@@ -17,7 +19,6 @@ function handler(req, res) {
     return;
   }
 
-  // Use includes or startsWith for Vercel path handling
   if (url.includes('/api/health') && method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'ok', version: '1.0.0', platform: 'Serverless' }));
@@ -56,6 +57,49 @@ function handler(req, res) {
           res.end(JSON.stringify({ error: 'Level not supported' }));
           return;
         }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ result }));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid JSON' }));
+      }
+    });
+    return;
+  }
+
+  if (url.includes('/api/decrypt') && method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const { input, method: decryptMethod } = JSON.parse(body);
+        let result = '';
+        if (decryptMethod === 'base64') result = L1Decryptor.fromBase64(input);
+        else if (decryptMethod === 'hex') result = L1Decryptor.fromHex(input);
+        else if (decryptMethod === 'url') result = L1Decryptor.fromUrl(input);
+        else {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Decryption method not supported via API yet' }));
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ result }));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid JSON' }));
+      }
+    });
+    return;
+  }
+
+  if (url.includes('/api/deobfuscate') && method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const { input } = JSON.parse(body);
+        const unwrapped = Deobfuscator.unwrapEval(input);
+        const result = Deobfuscator.decodeEscapes(unwrapped);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ result }));
       } catch (e) {
