@@ -12,11 +12,17 @@ const path = require('path');
 
 // Configuration
 const token = process.env.TELEGRAM_BOT_TOKEN || 'YOUR_TELEGRAM_BOT_TOKEN';
-const apiUrl = process.env.API_URL || 'http://localhost:3000'; // Change to your Vercel URL
+const apiUrl = process.env.API_URL || 'http://localhost:3000';
+const apiKey = process.env.CIPHERLAB_API_KEY || 'cipherlab_dev_secret'; // Must match server-side key
 
 const bot = new TelegramBot(token, { polling: true });
 
-console.log('CipherLab Bot is starting...');
+const apiClient = axios.create({
+  baseURL: apiUrl,
+  headers: { 'x-api-key': apiKey }
+});
+
+console.log('CipherLab Bot v1.1.0 is starting...');
 
 const userState = {};
 
@@ -99,10 +105,10 @@ bot.on('message', async (msg) => {
       let result;
 
       if (state.action === 'detect') {
-        const res = await axios.post(`${apiUrl}/api/detect`, { input: inputData });
+        const res = await apiClient.post(`/api/detect`, { input: inputData });
         result = JSON.stringify(res.data, null, 2);
       } else if (state.action === 'encrypt') {
-        const res = await axios.post(`${apiUrl}/api/encrypt`, { 
+        const res = await apiClient.post(`/api/encrypt`, { 
           input: inputData, 
           level: state.level, 
           password: state.password 
@@ -110,16 +116,16 @@ bot.on('message', async (msg) => {
         result = JSON.stringify(res.data, null, 2);
       } else if (state.action === 'decrypt') {
         // First detect
-        const detectRes = await axios.post(`${apiUrl}/api/detect`, { input: inputData });
+        const detectRes = await apiClient.post(`/api/detect`, { input: inputData });
         const method = detectRes.data.suggestedDecryptMethod;
         if (method && method !== 'unknown') {
-          const res = await axios.post(`${apiUrl}/api/decrypt`, { input: inputData, method });
+          const res = await apiClient.post(`/api/decrypt`, { input: inputData, method });
           result = res.data.result;
         } else {
           result = "Could not auto-detect decryption method.";
         }
       } else if (state.action === 'deobfuscate') {
-        const res = await axios.post(`${apiUrl}/api/deobfuscate`, { input: inputData });
+        const res = await apiClient.post(`/api/deobfuscate`, { input: inputData });
         result = res.data.result;
       }
 

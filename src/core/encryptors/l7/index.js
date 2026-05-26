@@ -3,6 +3,7 @@ const crypto = require('crypto');
 class L7Encryptor {
   /**
    * Level 7: MAX Fortress Mode
+   * Improvements: Self-contained header to prevent key loss.
    */
   static encrypt(input, password) {
     const masterKey = crypto.randomBytes(32);
@@ -17,18 +18,19 @@ class L7Encryptor {
 
     const mutated = encrypted.split('').reverse().join('');
 
-    const result = {
-      version: '1.0.0',
-      iv: iv.toString('hex'),
-      tag: tag,
-      content: mutated,
-      layers: ['AES-256-GCM', 'ReverseMutation']
-    };
-
     const keyFile = {
       salt: salt.toString('hex'),
       masterKeyEncrypted: this.xor(masterKey, protectedKey).toString('hex'),
       hint: 'PBKDF2-SHA512-310000'
+    };
+
+    const result = {
+      version: '1.1.0',
+      header: Buffer.from(JSON.stringify(keyFile)).toString('base64'), // Self-contained header
+      iv: iv.toString('hex'),
+      tag: tag,
+      content: mutated,
+      layers: ['AES-256-GCM', 'ReverseMutation', 'EmbeddedKeyHeader']
     };
 
     return {
