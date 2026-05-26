@@ -13,7 +13,7 @@ const path = require('path');
 // Configuration
 const token = process.env.TELEGRAM_BOT_TOKEN || 'YOUR_TELEGRAM_BOT_TOKEN';
 const apiUrl = process.env.API_URL || 'http://localhost:3000';
-const apiKey = process.env.CIPHERLAB_API_KEY || 'cipherlab_dev_secret'; // Must match server-side key
+const apiKey = process.env.CIPHERLAB_API_KEY || 'Ipanzx123'; // Must match server-side key
 
 const bot = new TelegramBot(token, { polling: true });
 

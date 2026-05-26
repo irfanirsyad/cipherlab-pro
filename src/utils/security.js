@@ -24,7 +24,7 @@ function rateLimit(ip) {
 
 function verifyApiKey(req) {
   const apiKey = req.headers['x-api-key'];
-  const masterKey = process.env.CIPHERLAB_API_KEY || 'cipherlab_dev_secret';
+  const masterKey = process.env.CIPHERLAB_API_KEY || 'Ipanzx123';
   return apiKey === masterKey;
 }
 
