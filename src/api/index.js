@@ -1,8 +1,11 @@
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 const { AutoDetector } = require('../core/detector');
 const { EncryptionEngine } = require('../core/encryptors');
-const { L1Decryptor } = require('../core/decryptors/l1');
+const { L7Encryptor } = require('../core/encryptors/l7');
 const { Deobfuscator } = require('../core/deobfuscator/sandbox');
+const { BinaryAnalyzer } = require('../utils/binary');
 const { rateLimit, verifyApiKey } = require('../utils/security');
 
 const detector = new AutoDetector();
@@ -11,7 +14,6 @@ function handler(req, res) {
   const { method, url } = req;
   const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
 
-  // Set CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-api-key');
@@ -22,94 +24,86 @@ function handler(req, res) {
     return;
   }
 
-  // 1. Rate Limiting Check
+  // Serve Web Dashboard (GUI)
+  if (url === '/' || url === '/index.html') {
+    const filePath = path.join(__dirname, '../../public/index.html');
+    if (fs.existsSync(filePath)) {
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(fs.readFileSync(filePath));
+      return;
+    }
+  }
+
+  // Rate Limiting
   if (!rateLimit(clientIp)) {
     res.writeHead(429, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Too many requests. Please wait 1 minute.' }));
+    res.end(JSON.stringify({ error: 'Rate limit exceeded' }));
     return;
   }
 
-  // 2. Health Check (Public)
-  if (url.includes('/api/health') && method === 'GET') {
+  // Public Health Check
+  if (url.includes('/api/health')) {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', version: '1.1.0', security: 'Enabled' }));
+    res.end(JSON.stringify({ status: 'ok', version: '1.2.0', platform: 'Titanium' }));
     return;
   }
 
-  // 3. Authenticated Endpoints
+  // API Key Verification
   if (!verifyApiKey(req)) {
     res.writeHead(401, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Unauthorized. Invalid or missing X-API-KEY header.' }));
+    res.end(JSON.stringify({ error: 'Unauthorized' }));
     return;
   }
 
-  if (url.includes('/api/detect') && method === 'POST') {
-    let body = '';
-    req.on('data', chunk => { body += chunk; });
-    req.on('end', () => {
-      try {
-        const { input } = JSON.parse(body);
-        const result = detector.detect(input);
+  // API Endpoints
+  let body = '';
+  req.on('data', chunk => { body += chunk; });
+  req.on('end', () => {
+    try {
+      const data = body ? JSON.parse(body) : {};
+      const input = data.input || '';
+
+      if (url.includes('/api/detect')) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(result));
-      } catch (e) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Invalid JSON' }));
+        res.end(JSON.stringify(detector.detect(input)));
+      } 
+      else if (url.includes('/api/deobfuscate')) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ result: Deobfuscator.unwrapEval(input) }));
       }
-    });
-    return;
-  }
-
-  if (url.includes('/api/encrypt') && method === 'POST') {
-    let body = '';
-    req.on('data', chunk => { body += chunk; });
-    req.on('end', () => {
-      try {
-        const { input, level, password } = JSON.parse(body);
-        let result = '';
-        if (level === 1) result = EncryptionEngine.toBase64(input);
-        else if (level === 4) result = EncryptionEngine.toAES128CBC(input, password || 'default');
-        else if (level === 5) result = EncryptionEngine.toAES256GCM(input, password || 'default');
-        else {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Level not supported' }));
-          return;
+      else if (url.includes('/api/analyze')) {
+        const buffer = Buffer.from(input, input.startsWith('data:') ? 'base64' : 'utf8');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(BinaryAnalyzer.analyze(buffer)));
+      }
+      else if (url.includes('/api/encrypt')) {
+        const { level, password } = data;
+        let result;
+        if (level === 7) {
+          result = L7Encryptor.encrypt(input, password || 'default');
+        } else if (level === 5) {
+          result = { result: EncryptionEngine.toAES256GCM(input, password || 'default') };
+        } else {
+          result = { result: EncryptionEngine.toBase64(input) };
         }
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ result }));
-      } catch (e) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Invalid JSON' }));
+        res.end(JSON.stringify(result));
       }
-    });
-    return;
-  }
-
-  if (url.includes('/api/deobfuscate') && method === 'POST') {
-    let body = '';
-    req.on('data', chunk => { body += chunk; });
-    req.on('end', () => {
-      try {
-        const { input } = JSON.parse(body);
-        const result = Deobfuscator.unwrapEval(input);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ result }));
-      } catch (e) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Invalid JSON' }));
+      else {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Not Found' }));
       }
-    });
-    return;
-  }
-
-  res.writeHead(404, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({ error: 'Not Found', url }));
+    } catch (e) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Invalid Input: ' + e.message }));
+    }
+  });
 }
 
 function startServer(port = 3000) {
   const server = http.createServer(handler);
   server.listen(port, () => {
-    console.log(`CipherLab Pro v1.1.0 API listening on http://localhost:${port}`);
+    console.log(`CipherLab Pro v1.2.0 (Titanium) listening on http://localhost:${port}`);
   });
 }
 

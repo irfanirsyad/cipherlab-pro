@@ -2,70 +2,72 @@ const vm = require('vm');
 
 class Deobfuscator {
   /**
-   * Advanced Deobfuscation: Handles eval() chains and basic String Array Mapping.
+   * Titan Engine: Sandbox Guard + Pattern Recovery
    */
   static unwrapEval(code) {
+    // 1. Sandbox Guard (W5 Mitigation)
+    if (this.isMalicious(code)) {
+      return "BLOCKED: Potential Sandbox Escape detected (constructor/proto access).";
+    }
+
     let results = [];
-    
-    // Improved Sandbox: Null out potentially dangerous globals
     const context = {
       eval: (c) => { results.push(c); return c; },
       console: { log: () => {} },
       process: null,
       require: null,
-      module: null,
       Buffer: null
     };
 
     try {
-      // 1. Pre-process: Detect and recover common String Array Obfuscation patterns
-      // Example: var _0x1234 = ['a', 'b', 'c']; ... _0x1234[0]
+      // 2. Pattern Recovery (W1 Mitigation)
       code = this.recoverStringArrays(code);
+      code = this.flattenMemberExpressions(code);
 
-      // 2. Run in isolated context
       vm.createContext(context);
       vm.runInContext(code, context, { timeout: 2000 });
       
       let finalResult = results.join('\n\n') || code;
-      
-      // 3. Post-process: Decode remaining escapes
       return this.decodeEscapes(finalResult);
     } catch (e) {
-      return `Error during deobfuscation: ${e.message}\nInput might be partially recovered or requires custom handling.`;
+      return `Error: ${e.message}`;
     }
   }
 
-  /**
-   * Recovers string arrays commonly used by obfuscator.io
-   * This is a simplified regex-based recovery (simulating AST traversal)
-   */
+  static isMalicious(code) {
+    const blacklisted = [
+      /\.constructor/i,
+      /__proto__/i,
+      /prototype/i,
+      /Function\(/i,
+      /global\./i
+    ];
+    return blacklisted.some(pattern => pattern.test(code));
+  }
+
   static recoverStringArrays(code) {
-    // Regex to find: var _0x... = ['...', '...'];
     const arrayRegex = /var\s+(_0x[a-f0-9]+)\s*=\s*(\[[^\]]+\])/g;
     let match;
     let newCode = code;
-
     while ((match = arrayRegex.exec(code)) !== null) {
       const varName = match[1];
       try {
-        const arr = JSON.parse(match[2].replace(/'/g, '"')); // Simple convert to valid JSON
-        
-        // Find and replace usages like _0x1234[0]
+        const arr = JSON.parse(match[2].replace(/'/g, '"'));
         const usageRegex = new RegExp(`${varName}\\[(\\d+)\\]`, 'g');
-        newCode = newCode.replace(usageRegex, (m, index) => {
-          return `'${arr[parseInt(index)]}'`;
-        });
-      } catch (e) { /* skip if malformed */ }
+        newCode = newCode.replace(usageRegex, (m, i) => `'${arr[parseInt(i)]}'`);
+      } catch (e) {}
     }
     return newCode;
   }
 
+  static flattenMemberExpressions(code) {
+    // Converts _0x123['log'] to _0x123.log
+    return code.replace(/([\w$]+)\[['"]([\w$]+)['"]\]/g, '$1.$2');
+  }
+
   static decodeEscapes(input) {
-    return input.replace(/\\x([0-9a-fA-F]{2})/g, (match, hex) => {
-      return String.fromCharCode(parseInt(hex, 16));
-    }).replace(/\\u([0-9a-fA-F]{4})/g, (match, hex) => {
-      return String.fromCharCode(parseInt(hex, 16));
-    });
+    return input.replace(/\\x([0-9a-fA-F]{2})/g, (match, hex) => String.fromCharCode(parseInt(hex, 16)))
+                .replace(/\\u([0-9a-fA-F]{4})/g, (match, hex) => String.fromCharCode(parseInt(hex, 16)));
   }
 }
 
